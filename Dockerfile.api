@@ -23,6 +23,7 @@ RUN addgroup --system alarm && adduser --system --ingroup alarm alarm
 
 COPY --from=builder /tmp/dist /tmp/dist
 COPY deploy /app/deploy
+COPY deploy /usr/local/lib/python3.14/deploy
 
 RUN python -m pip install --upgrade pip && \
     pip install /tmp/dist/*.whl "websockets>=12.0" && \
