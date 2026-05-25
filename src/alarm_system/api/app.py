@@ -128,10 +128,11 @@ def create_app(
         lifespan=lifespan,
     )
 
-    app.add_middleware(
+   app.add_middleware(
     CORSMiddleware,
     allow_origins=[
         "http://localhost:5173",
+        "https://alarm-system-frontend.vercel.app",
     ],
     allow_credentials=True,
     allow_methods=["*"],
