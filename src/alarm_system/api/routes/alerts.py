@@ -101,6 +101,24 @@ def _format_alert_created_message(alert) -> str:
     )
 
 
+def _format_alert_status_message(alert) -> str:
+    alert_title = alert.alert_type.replace("_", " ").title()
+
+    if alert.enabled:
+        status = "resumed"
+        emoji = "✅"
+    else:
+        status = "paused"
+        emoji = "⏸️"
+
+    return (
+        f"{emoji} Alert {status}\n\n"
+        f"Type: {alert_title}\n"
+        f"Cooldown: {alert.cooldown_seconds}s\n"
+        f"Channels: {', '.join(alert.channels)}"
+    )
+
+
 async def _create_alert(
     store: AlertStore,
     payload: AlertCreateRequest,
@@ -141,10 +159,11 @@ async def _create_alert(
     return AlertResponse(alert=saved)
 
 
-def _update_alert(
+async def _update_alert(
     store: AlertStore,
     alert_id: str,
     payload: AlertUpdateRequest,
+    telegram_client: TelegramApiClient,
 ) -> AlertResponse:
     _validate_alert_rule_identity(
         rule_id=payload.rule_id,
@@ -168,6 +187,19 @@ def _update_alert(
         raise HTTPException(status_code=422, detail=str(exc)) from exc
     except AlertStoreBackendError as exc:
         _raise_backend_unavailable(exc)
+
+    if existing.enabled != saved.enabled:
+        try:
+            await telegram_client.send_message(
+                chat_id=saved.user_id,
+                text=_format_alert_status_message(saved),
+            )
+        except Exception as exc:  # noqa: BLE001
+            logger.error(
+                "telegram_alert_status_notification_failed",
+                exc_info=exc,
+            )
+
     return AlertResponse(alert=saved)
 
 
@@ -289,11 +321,16 @@ def build_alerts_router(  # noqa: C901
         )
 
     @router.put("/alerts/{alert_id}", response_model=AlertResponse)
-    def update_alert(
+    async def update_alert(
         alert_id: str,
         payload: AlertUpdateRequest,
     ) -> AlertResponse:
-        return _update_alert(store, alert_id, payload)
+        return await _update_alert(
+            store,
+            alert_id,
+            payload,
+            telegram_client,
+        )
 
     @router.delete("/alerts/{alert_id}")
     def delete_alert(alert_id: str) -> dict[str, bool]:
