@@ -90,6 +90,17 @@ def _get_alert(store: AlertStore, alert_id: str) -> AlertResponse:
     return AlertResponse(alert=alert)
 
 
+def _format_alert_created_message(alert) -> str:
+    alert_title = alert.alert_type.replace("_", " ").title()
+
+    return (
+        "🚨 Alert created\n\n"
+        f"Type: {alert_title}\n"
+        f"Cooldown: {alert.cooldown_seconds}s\n"
+        f"Channels: {', '.join(alert.channels)}"
+    )
+
+
 async def _create_alert(
     store: AlertStore,
     payload: AlertCreateRequest,
@@ -119,11 +130,7 @@ async def _create_alert(
     try:
         await telegram_client.send_message(
             chat_id=saved.user_id,
-            text=(
-                "🚨 Alert created\n\n"
-                f"Rule: {saved.rule_id}\n"
-                f"Version: {saved.rule_version}"
-            ),
+            text=_format_alert_created_message(saved),
         )
     except Exception as exc:  # noqa: BLE001
         logger.error(
