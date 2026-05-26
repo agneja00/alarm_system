@@ -119,6 +119,17 @@ def _format_alert_status_message(alert) -> str:
     )
 
 
+def _format_alert_deleted_message(alert) -> str:
+    alert_title = alert.alert_type.replace("_", " ").title()
+
+    return (
+        "🗑️ Alert deleted\n\n"
+        f"Type: {alert_title}\n"
+        f"Cooldown: {alert.cooldown_seconds}s\n"
+        f"Channels: {', '.join(alert.channels)}"
+    )
+
+
 async def _create_alert(
     store: AlertStore,
     payload: AlertCreateRequest,
@@ -169,18 +180,22 @@ async def _update_alert(
         rule_id=payload.rule_id,
         rule_version=payload.rule_version,
     )
+
     try:
         existing = store.get_alert(alert_id)
         if existing is None:
             raise HTTPException(status_code=404, detail="alert not found")
+
         alert = payload.to_alert(
             alert_id=alert_id,
             created_at=existing.created_at,
         )
+
         saved = store.upsert_alert(
             alert,
             expected_version=payload.expected_version,
         )
+
     except AlertStoreConflictError as exc:
         raise HTTPException(status_code=409, detail=str(exc)) from exc
     except AlertStoreContractError as exc:
@@ -203,11 +218,35 @@ async def _update_alert(
     return AlertResponse(alert=saved)
 
 
-def _delete_alert(store: AlertStore, alert_id: str) -> dict[str, bool]:
+async def _delete_alert(
+    store: AlertStore,
+    alert_id: str,
+    telegram_client: TelegramApiClient,
+) -> dict[str, bool]:
     try:
-        return {"deleted": store.delete_alert(alert_id)}
+        existing = store.get_alert(alert_id)
+
+        if existing is None:
+            raise HTTPException(status_code=404, detail="alert not found")
+
+        deleted = store.delete_alert(alert_id)
+
     except AlertStoreBackendError as exc:
         _raise_backend_unavailable(exc)
+
+    if deleted:
+        try:
+            await telegram_client.send_message(
+                chat_id=existing.user_id,
+                text=_format_alert_deleted_message(existing),
+            )
+        except Exception as exc:  # noqa: BLE001
+            logger.error(
+                "telegram_alert_delete_notification_failed",
+                exc_info=exc,
+            )
+
+    return {"deleted": deleted}
 
 
 def _list_bindings(
@@ -231,8 +270,10 @@ def _get_binding(store: AlertStore, binding_id: str) -> ChannelBindingResponse:
         binding = store.get_binding(binding_id)
     except AlertStoreBackendError as exc:
         _raise_backend_unavailable(exc)
+
     if binding is None:
         raise HTTPException(status_code=404, detail="binding not found")
+
     return ChannelBindingResponse(binding=binding)
 
 
@@ -244,6 +285,7 @@ def _upsert_binding(
         saved = store.upsert_binding(payload.to_binding())
     except AlertStoreBackendError as exc:
         _raise_backend_unavailable(exc)
+
     return ChannelBindingResponse(binding=saved)
 
 
@@ -268,8 +310,10 @@ def build_alerts_router(  # noqa: C901
     ) -> None:
         if internal_api_key is None:
             return
+
         if x_alarm_internal_api_key == internal_api_key:
             return
+
         raise HTTPException(
             status_code=401,
             detail="invalid internal api key",
@@ -289,6 +333,7 @@ def build_alerts_router(  # noqa: C901
             rules = load_rules_cached()
         except ValueError as exc:
             raise HTTPException(status_code=503, detail=str(exc)) from exc
+
         return RuleCatalogResponse(
             rules=[
                 RuleSummary(
@@ -333,8 +378,12 @@ def build_alerts_router(  # noqa: C901
         )
 
     @router.delete("/alerts/{alert_id}")
-    def delete_alert(alert_id: str) -> dict[str, bool]:
-        return _delete_alert(store, alert_id)
+    async def delete_alert(alert_id: str) -> dict[str, bool]:
+        return await _delete_alert(
+            store,
+            alert_id,
+            telegram_client,
+        )
 
     @router.get("/channel-bindings", response_model=ChannelBindingListResponse)
     def list_channel_bindings(
