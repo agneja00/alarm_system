@@ -167,6 +167,7 @@ def create_app(
     app.include_router(
         build_alerts_router(
             resolved_store,
+            resolved_telegram_client,
             internal_api_key=internal_api_key,
         )
     )

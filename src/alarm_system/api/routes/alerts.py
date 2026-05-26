@@ -26,6 +26,7 @@ from alarm_system.api.schemas import (
     RuleCatalogResponse,
     RuleSummary,
 )
+from alarm_system.api.telegram_client import TelegramApiClient
 from alarm_system.entities import DeliveryChannel
 
 logger = logging.getLogger(__name__)
@@ -70,7 +71,10 @@ def _list_alerts(
 ) -> AlertListResponse:
     try:
         return AlertListResponse(
-            alerts=store.list_alerts(user_id=user_id, include_disabled=include_disabled)
+            alerts=store.list_alerts(
+                user_id=user_id,
+                include_disabled=include_disabled,
+            )
         )
     except AlertStoreBackendError as exc:
         _raise_backend_unavailable(exc)
@@ -86,15 +90,17 @@ def _get_alert(store: AlertStore, alert_id: str) -> AlertResponse:
     return AlertResponse(alert=alert)
 
 
-def _create_alert(
+async def _create_alert(
     store: AlertStore,
     payload: AlertCreateRequest,
+    telegram_client: TelegramApiClient,
 ) -> AlertResponse:
     _validate_alert_rule_identity(
         rule_id=payload.rule_id,
         rule_version=payload.rule_version,
     )
     alert = payload.to_alert()
+
     try:
         existing = store.get_alert(alert.alert_id)
         if existing is not None:
@@ -109,6 +115,22 @@ def _create_alert(
         raise HTTPException(status_code=422, detail=str(exc)) from exc
     except AlertStoreBackendError as exc:
         _raise_backend_unavailable(exc)
+
+    try:
+        await telegram_client.send_message(
+            chat_id=saved.user_id,
+            text=(
+                "🚨 Alert created\n\n"
+                f"Rule: {saved.rule_id}\n"
+                f"Version: {saved.rule_version}"
+            ),
+        )
+    except Exception as exc:  # noqa: BLE001
+        logger.error(
+            "telegram_alert_notification_failed",
+            exc_info=exc,
+        )
+
     return AlertResponse(alert=saved)
 
 
@@ -125,8 +147,14 @@ def _update_alert(
         existing = store.get_alert(alert_id)
         if existing is None:
             raise HTTPException(status_code=404, detail="alert not found")
-        alert = payload.to_alert(alert_id=alert_id, created_at=existing.created_at)
-        saved = store.upsert_alert(alert, expected_version=payload.expected_version)
+        alert = payload.to_alert(
+            alert_id=alert_id,
+            created_at=existing.created_at,
+        )
+        saved = store.upsert_alert(
+            alert,
+            expected_version=payload.expected_version,
+        )
     except AlertStoreConflictError as exc:
         raise HTTPException(status_code=409, detail=str(exc)) from exc
     except AlertStoreContractError as exc:
@@ -150,7 +178,10 @@ def _list_bindings(
 ) -> ChannelBindingListResponse:
     try:
         return ChannelBindingListResponse(
-            bindings=store.list_bindings(user_id=user_id, channel=channel)
+            bindings=store.list_bindings(
+                user_id=user_id,
+                channel=channel,
+            )
         )
     except AlertStoreBackendError as exc:
         _raise_backend_unavailable(exc)
@@ -186,6 +217,7 @@ def _delete_binding(store: AlertStore, binding_id: str) -> dict[str, bool]:
 
 def build_alerts_router(  # noqa: C901
     store: AlertStore,
+    telegram_client: TelegramApiClient,
     *,
     internal_api_key: str | None = None,
 ) -> APIRouter:
@@ -242,11 +274,18 @@ def build_alerts_router(  # noqa: C901
         return _get_alert(store, alert_id)
 
     @router.post("/alerts", response_model=AlertResponse)
-    def create_alert(payload: AlertCreateRequest) -> AlertResponse:
-        return _create_alert(store, payload)
+    async def create_alert(payload: AlertCreateRequest) -> AlertResponse:
+        return await _create_alert(
+            store,
+            payload,
+            telegram_client,
+        )
 
     @router.put("/alerts/{alert_id}", response_model=AlertResponse)
-    def update_alert(alert_id: str, payload: AlertUpdateRequest) -> AlertResponse:
+    def update_alert(
+        alert_id: str,
+        payload: AlertUpdateRequest,
+    ) -> AlertResponse:
         return _update_alert(store, alert_id, payload)
 
     @router.delete("/alerts/{alert_id}")
