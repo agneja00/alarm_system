@@ -101,6 +101,21 @@ def _format_alert_created_message(alert) -> str:
     )
 
 
+def _build_alert_reply_markup() -> dict:
+    return {
+        "inline_keyboard": [
+            [
+                {
+                    "text": "Open Alarm System",
+                    "web_app": {
+                        "url": "https://alarm-system-frontend.vercel.app",
+                    },
+                }
+            ]
+        ]
+    }
+
+
 def _format_alert_status_message(alert) -> str:
     alert_title = alert.alert_type.replace("_", " ").title()
 
@@ -160,6 +175,7 @@ async def _create_alert(
         await telegram_client.send_message(
             chat_id=saved.user_id,
             text=_format_alert_created_message(saved),
+            reply_markup=_build_alert_reply_markup(),
         )
     except Exception as exc:  # noqa: BLE001
         logger.error(
@@ -208,6 +224,7 @@ async def _update_alert(
             await telegram_client.send_message(
                 chat_id=saved.user_id,
                 text=_format_alert_status_message(saved),
+                reply_markup=_build_alert_reply_markup(),
             )
         except Exception as exc:  # noqa: BLE001
             logger.error(
@@ -239,6 +256,7 @@ async def _delete_alert(
             await telegram_client.send_message(
                 chat_id=existing.user_id,
                 text=_format_alert_deleted_message(existing),
+                reply_markup=_build_alert_reply_markup(),
             )
         except Exception as exc:  # noqa: BLE001
             logger.error(
