@@ -21,7 +21,11 @@ from alarm_system.api.migrations import (
     apply_sql_migrations,
     should_auto_apply_sql_migrations,
 )
-from alarm_system.api.routes import build_alerts_router, build_telegram_router
+from alarm_system.api.routes import (
+    build_alerts_router,
+    build_telegram_router,
+    build_test_telegram_router,
+)
 from alarm_system.api.routes.telegram_commands import TELEGRAM_BOT_COMMANDS
 from alarm_system.api.telegram_client import TelegramApiClient
 from alarm_system.state import (
@@ -176,6 +180,13 @@ def create_app(
             secret_token=webhook_secret,
         )
     )
+
+    app.include_router(
+        build_test_telegram_router(
+            telegram_client=resolved_telegram_client,
+        )
+    )
+
     return app
 
 
