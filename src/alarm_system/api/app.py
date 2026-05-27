@@ -162,7 +162,7 @@ def create_app(
 
     @app.get("/health", tags=["health"])
     def health() -> dict[str, str]:
-        raise RuntimeError("Sentry backend test error")
+        return {"status": "ok"}
 
     @app.exception_handler(RequestValidationError)
     async def request_validation_error_handler(
