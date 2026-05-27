@@ -5,6 +5,8 @@ import logging
 import os
 from typing import Any
 
+import sentry_sdk
+
 from fastapi import FastAPI
 from fastapi.exceptions import RequestValidationError
 from fastapi.middleware.cors import CORSMiddleware
@@ -42,6 +44,17 @@ from alarm_system.state import (
 logger = logging.getLogger(__name__)
 _PROD_ENVS = {"staging", "prod"}
 
+def _init_sentry() -> None:
+    sentry_dsn = os.getenv("SENTRY_DSN")
+
+    if not sentry_dsn:
+        return
+
+    sentry_sdk.init(
+        dsn=sentry_dsn,
+        traces_sample_rate=1.0,
+        environment=os.getenv("ALARM_ENV", "dev"),
+    )
 
 def create_app(
     *,
@@ -51,6 +64,8 @@ def create_app(
     attempt_store: DeliveryAttemptStore | None = None,
     session_store: SessionStore | None = None,
 ) -> FastAPI:
+    _init_sentry()
+
     alarm_env = _read_alarm_env()
     shared_redis_client = _build_shared_redis_client(alarm_env=alarm_env)
     resolved_store = store or _store_from_env(
